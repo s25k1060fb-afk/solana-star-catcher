@@ -1,0 +1,459 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
+<title>Solana Star Catcher</title>
+<style>
+  :root {
+    --purple: #9945FF;
+    --green: #14F195;
+    --bg1: #0b0614;
+    --bg2: #1a0b36;
+  }
+  * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+  html, body {
+    margin: 0;
+    height: 100%;
+    overflow: hidden;
+    background: var(--bg1);
+    color: #fff;
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "Hiragino Sans", "Noto Sans JP", Meiryo, sans-serif;
+    touch-action: none;
+    user-select: none;
+    -webkit-user-select: none;
+  }
+  #app {
+    display: flex;
+    flex-direction: column;
+    height: 100%;
+    max-width: 720px;
+    margin: 0 auto;
+    background: linear-gradient(180deg, var(--bg2) 0%, var(--bg1) 100%);
+    position: relative;
+  }
+  header {
+    padding: 12px 16px 10px;
+    text-align: center;
+    border-bottom: 1px solid rgba(153, 69, 255, 0.4);
+    background: rgba(11, 6, 20, 0.6);
+    flex: 0 0 auto;
+  }
+  h1 {
+    margin: 0 0 8px;
+    font-size: clamp(20px, 5.5vw, 30px);
+    font-weight: 800;
+    letter-spacing: 0.02em;
+    background: linear-gradient(90deg, var(--purple), var(--green));
+    -webkit-background-clip: text;
+    background-clip: text;
+    color: transparent;
+  }
+  .stats {
+    display: flex;
+    justify-content: center;
+    gap: 12px;
+  }
+  .stat {
+    flex: 1;
+    max-width: 200px;
+    padding: 6px 10px;
+    border-radius: 12px;
+    background: rgba(153, 69, 255, 0.15);
+    border: 1px solid rgba(153, 69, 255, 0.55);
+  }
+  .stat .label {
+    font-size: 11px;
+    opacity: 0.75;
+    letter-spacing: 0.08em;
+  }
+  .stat .value {
+    font-size: 24px;
+    font-weight: 800;
+    font-variant-numeric: tabular-nums;
+    color: var(--green);
+  }
+  #time.low { color: #ff5d8f; animation: pulse 0.5s infinite alternate; }
+  @keyframes pulse { from { transform: scale(1); } to { transform: scale(1.12); } }
+
+  #stage {
+    position: relative;
+    flex: 1 1 auto;
+    min-height: 0;
+  }
+  canvas {
+    position: absolute;
+    inset: 0;
+    width: 100%;
+    height: 100%;
+    display: block;
+    cursor: pointer;
+  }
+  .overlay {
+    position: absolute;
+    inset: 0;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 14px;
+    padding: 24px;
+    text-align: center;
+    background: rgba(11, 6, 20, 0.78);
+    backdrop-filter: blur(3px);
+    -webkit-backdrop-filter: blur(3px);
+    z-index: 5;
+  }
+  .overlay.hidden { display: none; }
+  .overlay h2 {
+    margin: 0;
+    font-size: clamp(24px, 7vw, 36px);
+    color: var(--green);
+  }
+  .overlay p {
+    margin: 0;
+    line-height: 1.7;
+    opacity: 0.9;
+    font-size: 15px;
+  }
+  .big-score {
+    font-size: clamp(56px, 18vw, 96px);
+    font-weight: 900;
+    line-height: 1;
+    background: linear-gradient(90deg, var(--purple), var(--green));
+    -webkit-background-clip: text;
+    background-clip: text;
+    color: transparent;
+    font-variant-numeric: tabular-nums;
+  }
+  button {
+    font: inherit;
+    font-size: 20px;
+    font-weight: 800;
+    padding: 14px 40px;
+    border: none;
+    border-radius: 999px;
+    color: #0b0614;
+    background: linear-gradient(90deg, var(--purple), var(--green));
+    box-shadow: 0 0 24px rgba(153, 69, 255, 0.6);
+    cursor: pointer;
+    transition: transform 0.1s;
+  }
+  button:active { transform: scale(0.95); }
+  #best { color: var(--green); font-weight: 700; }
+</style>
+</head>
+<body>
+<div id="app">
+  <header>
+    <h1>Solana Star Catcher</h1>
+    <div class="stats">
+      <div class="stat"><div class="label">スコア</div><div class="value" id="score">0</div></div>
+      <div class="stat"><div class="label">残り時間</div><div class="value" id="time">30</div></div>
+    </div>
+  </header>
+
+  <div id="stage">
+    <canvas id="game"></canvas>
+
+    <div class="overlay" id="startScreen">
+      <h2>★ 星をキャッチ！ ★</h2>
+      <p>落ちてくる星をタップ／クリックして集めよう。<br>
+         小さい星ほどポイントが高いよ。<br>
+         制限時間は <b>30秒</b>！</p>
+      <button id="startBtn">スタート</button>
+    </div>
+
+    <div class="overlay hidden" id="endScreen">
+      <h2>タイムアップ！</h2>
+      <div class="big-score" id="finalScore">0</div>
+      <p>ベストスコア：<span id="best">0</span></p>
+      <button id="retryBtn">もう一度</button>
+    </div>
+  </div>
+</div>
+
+<script>
+(() => {
+  'use strict';
+
+  const PURPLE = '#9945FF';
+  const GREEN  = '#14F195';
+  const GAME_SECONDS = 30;
+
+  const canvas = document.getElementById('game');
+  const ctx = canvas.getContext('2d');
+  const scoreEl = document.getElementById('score');
+  const timeEl = document.getElementById('time');
+  const startScreen = document.getElementById('startScreen');
+  const endScreen = document.getElementById('endScreen');
+  const finalScoreEl = document.getElementById('finalScore');
+  const bestEl = document.getElementById('best');
+
+  let W = 0, H = 0, dpr = 1;
+  let stars = [];
+  let particles = [];
+  let popups = [];
+  let bgStars = [];
+  let score = 0;
+  let timeLeft = GAME_SECONDS;
+  let running = false;
+  let lastFrame = 0;
+  let spawnTimer = 0;
+  let elapsed = 0;
+
+  function loadBest() {
+    try { return parseInt(localStorage.getItem('ssc_best') || '0', 10) || 0; }
+    catch (e) { return 0; }
+  }
+  function saveBest(v) {
+    try { localStorage.setItem('ssc_best', String(v)); } catch (e) {}
+  }
+  let best = loadBest();
+
+  function resize() {
+    dpr = Math.min(window.devicePixelRatio || 1, 2);
+    const r = canvas.getBoundingClientRect();
+    W = r.width; H = r.height;
+    canvas.width = Math.round(W * dpr);
+    canvas.height = Math.round(H * dpr);
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    bgStars = [];
+    for (let i = 0; i < 50; i++) {
+      bgStars.push({
+        x: Math.random() * W, y: Math.random() * H,
+        r: Math.random() * 1.4 + 0.3,
+        s: Math.random() * 12 + 4,
+        a: Math.random() * 0.5 + 0.2
+      });
+    }
+  }
+  window.addEventListener('resize', resize);
+  window.addEventListener('orientationchange', () => setTimeout(resize, 200));
+
+  function rand(a, b) { return a + Math.random() * (b - a); }
+
+  function spawnStar() {
+    // 小さいほど高得点・速い
+    const roll = Math.random();
+    let size, points, speed, color;
+    if (roll < 0.15) {
+      size = rand(16, 20); points = 5; speed = rand(260, 340); color = GREEN;
+    } else if (roll < 0.5) {
+      size = rand(24, 30); points = 2; speed = rand(170, 240); color = PURPLE;
+    } else {
+      size = rand(32, 42); points = 1; speed = rand(110, 180); color = Math.random() < 0.5 ? PURPLE : GREEN;
+    }
+    // 時間が進むほど少し速くなる
+    speed *= 1 + (elapsed / GAME_SECONDS) * 0.35;
+    stars.push({
+      x: rand(size + 4, Math.max(size + 5, W - size - 4)),
+      y: -size,
+      size, points, speed, color,
+      rot: rand(0, Math.PI * 2),
+      vr: rand(-2, 2),
+      sway: rand(0, Math.PI * 2),
+      swayAmp: rand(0, 18)
+    });
+  }
+
+  function drawStarPath(x, y, outer, rot) {
+    const inner = outer * 0.48;
+    ctx.beginPath();
+    for (let i = 0; i < 10; i++) {
+      const r = i % 2 === 0 ? outer : inner;
+      const a = rot + (Math.PI / 5) * i - Math.PI / 2;
+      const px = x + Math.cos(a) * r;
+      const py = y + Math.sin(a) * r;
+      if (i === 0) ctx.moveTo(px, py); else ctx.lineTo(px, py);
+    }
+    ctx.closePath();
+  }
+
+  function burst(x, y, color) {
+    for (let i = 0; i < 14; i++) {
+      const a = rand(0, Math.PI * 2);
+      const v = rand(60, 220);
+      particles.push({
+        x, y, vx: Math.cos(a) * v, vy: Math.sin(a) * v,
+        life: 0.5, max: 0.5, color: Math.random() < 0.5 ? color : '#fff',
+        r: rand(1.5, 3.5)
+      });
+    }
+  }
+
+  function updateHud() {
+    scoreEl.textContent = score;
+    const t = Math.max(0, Math.ceil(timeLeft));
+    timeEl.textContent = t;
+    timeEl.classList.toggle('low', t <= 5 && running);
+  }
+
+  function startGame() {
+    score = 0;
+    timeLeft = GAME_SECONDS;
+    elapsed = 0;
+    stars = []; particles = []; popups = [];
+    spawnTimer = 0;
+    running = true;
+    startScreen.classList.add('hidden');
+    endScreen.classList.add('hidden');
+    updateHud();
+    lastFrame = performance.now();
+  }
+
+  function endGame() {
+    running = false;
+    timeLeft = 0;
+    updateHud();
+    if (score > best) { best = score; saveBest(best); }
+    finalScoreEl.textContent = score;
+    bestEl.textContent = best;
+    endScreen.classList.remove('hidden');
+  }
+
+  function handlePointer(e) {
+    if (!running) return;
+    e.preventDefault();
+    const r = canvas.getBoundingClientRect();
+    const px = e.clientX - r.left;
+    const py = e.clientY - r.top;
+    // 手前（後から出た星）を優先、タップしやすいよう判定を少し広めに
+    for (let i = stars.length - 1; i >= 0; i--) {
+      const s = stars[i];
+      const dx = px - s.x, dy = py - s.y;
+      const hit = s.size * 1.35 + 6;
+      if (dx * dx + dy * dy <= hit * hit) {
+        score += s.points;
+        burst(s.x, s.y, s.color);
+        popups.push({ x: s.x, y: s.y, text: '+' + s.points, life: 0.7, color: s.color });
+        stars.splice(i, 1);
+        updateHud();
+        return;
+      }
+    }
+  }
+  canvas.addEventListener('pointerdown', handlePointer);
+  // 古いブラウザ向けの保険は不要（pointer events は主要ブラウザ対応済み）
+
+  function update(dt) {
+    // 背景の星
+    for (const b of bgStars) {
+      b.y += b.s * dt;
+      if (b.y > H) { b.y = 0; b.x = Math.random() * W; }
+    }
+
+    if (running) {
+      elapsed += dt;
+      timeLeft -= dt;
+      if (timeLeft <= 0) { endGame(); }
+      spawnTimer -= dt;
+      const interval = 0.55 - (elapsed / GAME_SECONDS) * 0.25;
+      while (spawnTimer <= 0) {
+        spawnStar();
+        spawnTimer += interval * rand(0.7, 1.3);
+      }
+      updateHud();
+    }
+
+    for (let i = stars.length - 1; i >= 0; i--) {
+      const s = stars[i];
+      s.y += s.speed * dt;
+      s.rot += s.vr * dt;
+      s.sway += dt * 2;
+      s.x += Math.sin(s.sway) * s.swayAmp * dt;
+      if (s.y - s.size > H) stars.splice(i, 1);
+    }
+    for (let i = particles.length - 1; i >= 0; i--) {
+      const p = particles[i];
+      p.life -= dt;
+      if (p.life <= 0) { particles.splice(i, 1); continue; }
+      p.x += p.vx * dt; p.y += p.vy * dt;
+      p.vy += 300 * dt;
+    }
+    for (let i = popups.length - 1; i >= 0; i--) {
+      const p = popups[i];
+      p.life -= dt;
+      p.y -= 50 * dt;
+      if (p.life <= 0) popups.splice(i, 1);
+    }
+  }
+
+  function draw() {
+    ctx.clearRect(0, 0, W, H);
+
+    // 背景の小さな星
+    for (const b of bgStars) {
+      ctx.globalAlpha = b.a;
+      ctx.fillStyle = '#fff';
+      ctx.beginPath();
+      ctx.arc(b.x, b.y, b.r, 0, Math.PI * 2);
+      ctx.fill();
+    }
+    ctx.globalAlpha = 1;
+
+    // 落ちてくる星
+    for (const s of stars) {
+      ctx.save();
+      ctx.shadowColor = s.color;
+      ctx.shadowBlur = 18;
+      const g = ctx.createLinearGradient(s.x - s.size, s.y - s.size, s.x + s.size, s.y + s.size);
+      g.addColorStop(0, PURPLE);
+      g.addColorStop(1, GREEN);
+      drawStarPath(s.x, s.y, s.size, s.rot);
+      ctx.fillStyle = g;
+      ctx.fill();
+      ctx.shadowBlur = 0;
+      ctx.lineWidth = 2;
+      ctx.strokeStyle = s.color === PURPLE ? PURPLE : GREEN;
+      ctx.stroke();
+      ctx.restore();
+    }
+
+    // パーティクル
+    for (const p of particles) {
+      ctx.globalAlpha = Math.max(0, p.life / p.max);
+      ctx.fillStyle = p.color;
+      ctx.beginPath();
+      ctx.arc(p.x, p.y, p.r, 0, Math.PI * 2);
+      ctx.fill();
+    }
+    ctx.globalAlpha = 1;
+
+    // 得点ポップアップ
+    ctx.font = '800 22px -apple-system, "Hiragino Sans", sans-serif';
+    ctx.textAlign = 'center';
+    for (const p of popups) {
+      ctx.globalAlpha = Math.max(0, p.life / 0.7);
+      ctx.fillStyle = '#fff';
+      ctx.shadowColor = p.color;
+      ctx.shadowBlur = 10;
+      ctx.fillText(p.text, p.x, p.y);
+    }
+    ctx.shadowBlur = 0;
+    ctx.globalAlpha = 1;
+  }
+
+  function loop(now) {
+    const dt = Math.min((now - lastFrame) / 1000, 0.05);
+    lastFrame = now;
+    update(dt);
+    draw();
+    requestAnimationFrame(loop);
+  }
+
+  document.getElementById('startBtn').addEventListener('click', startGame);
+  document.getElementById('retryBtn').addEventListener('click', startGame);
+
+  // iOS Safari のダブルタップ拡大・長押しメニュー抑止
+  document.addEventListener('contextmenu', e => e.preventDefault());
+  document.addEventListener('gesturestart', e => e.preventDefault());
+
+  resize();
+  updateHud();
+  lastFrame = performance.now();
+  requestAnimationFrame(loop);
+})();
+</script>
+</body>
+</html>
